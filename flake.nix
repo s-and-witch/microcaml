@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: CC0-1.0
 
 {
-  description = "My haskell application";
+  description = "Awesome llvm-based compiler written in haskell";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs";
@@ -20,7 +20,6 @@
         jailbreakUnbreak = pkg:
           pkgs.haskell.lib.doJailbreak (pkg.overrideAttrs (_: { meta = { }; }));
 
-        # DON'T FORGET TO PUT YOUR PACKAGE NAME HERE, REMOVING `throw`
         packageName = "microcaml";
       in {
         packages.${packageName} =

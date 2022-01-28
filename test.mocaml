@@ -1,0 +1,8 @@
+let x = 5
+in let rec
+f = \y -> case y of
+{
+  5 -> f 6;
+  z -> + z x;
+}
+in f 10
