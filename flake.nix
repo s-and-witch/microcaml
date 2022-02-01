@@ -15,7 +15,13 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        haskellPackages = pkgs.haskellPackages;
+        haskellPackages = pkgs.haskell.packages.ghc8107.override {
+          overrides = self: original: {
+            
+          };
+        };
+
+        project = self.packages.${system}.${packageName};
 
         jailbreakUnbreak = pkg:
           pkgs.haskell.lib.doJailbreak (pkg.overrideAttrs (_: { meta = { }; }));
@@ -27,15 +33,18 @@
             # Dependency overrides go here
           };
 
-        defaultPackage = self.packages.${system}.${packageName};
+        defaultPackage = project;
 
-        devShell = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            haskellPackages.haskell-language-server # you must build it with your ghc to work
-            llvmPackages_9.llvm
-            cabal-install
-          ];
-          inputsFrom = builtins.attrValues self.packages.${system};
-        };
+        devShell = project.env.overrideAttrs
+          (old: {
+            nativeBuildInputs = old.nativeBuildInputs ++ [
+              pkgs.haskellPackages.haskell-language-server # you must build it with your ghc to work
+              pkgs.cabal-install
+            ];
+            buildInputs = old.buildInputs ++ [            
+              pkgs.llvmPackages_9.llvm
+            ];
+          }
+          );
       });
 }
