@@ -1,8 +1,22 @@
 let x = 5
 in let rec
+f : Int -> Int
 f = \y -> case y of
 {
-  5 -> f 6;
+  5 -> f z;
   z -> + z x;
-}
+};
+z = 6
+
 in f 10
+
+
+f : Int -> Int
+^ - name
+
+(6 + 3) : Int
+^ - expr
+
+(expr : typeexpr)
+
+data Name = Constr1 Args... | Constr2 Args...

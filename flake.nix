@@ -38,7 +38,7 @@
         devShell = project.env.overrideAttrs
           (old: {
             nativeBuildInputs = old.nativeBuildInputs ++ [
-              pkgs.haskellPackages.haskell-language-server # you must build it with your ghc to work
+              haskellPackages.haskell-language-server
               pkgs.cabal-install
             ];
             buildInputs = old.buildInputs ++ [            

@@ -25,13 +25,15 @@ extra-source-files: CHANGELOG.md
 
 common deps
   build-depends:
-    , base          ^>=4.14.3.0
+    , array
+    , base                ^>=4.14.3.0
     , bytestring
     , llvm-hs
     , llvm-hs-pure
-    , megaparsec
     , mtl
     , text
+    , megaparsec
+    , vector
 
   ghc-options:        -Wall
   default-extensions:
@@ -75,8 +77,8 @@ common deps
     ViewPatterns
 
 executable microcaml
-  main-is:          Main.hs
   import:           deps
+  main-is:          Main.hs
 
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:
@@ -88,8 +90,9 @@ executable microcaml
 library
   import:           deps
   hs-source-dirs:   src
-  exposed-modules:  
-    Parser
-    AST
-    Lexer
+  exposed-modules:
+    AST.AST
+    Lexer.Lexer
+
   default-language: Haskell2010
+  build-tools:    

@@ -13,10 +13,8 @@ import Control.Monad.Except
 import Data.ByteString.Char8 as BS
 import Data.Text
 
-data AST = 
-  Id 
 
 
 main :: IO ()
-main = putStrLn "hui"
+main = Prelude.putStrLn "hui"
 
