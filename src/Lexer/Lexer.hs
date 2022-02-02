@@ -197,14 +197,17 @@ data Pattern
 
 
 parseExpr :: Parser Expr 
-parseExpr = choice 
+parseExpr = makeApp <$> some (choice 
   [ between (symbol "(") (symbol ")") parseExpr
-  , parseApp
   , parseCase
   , parseLam
   , parseLet
   , Id <$> nameParser
-  ]
+  ])
+  where
+    makeApp [x] = x
+    makeApp (x:xs) =  App x xs
+
 
 parseLam :: Parser Expr
 parseLam = do
@@ -243,10 +246,6 @@ parseBranch = do
   symbol "->"
   expr <- parseExpr
   pure (pat, expr)
-
-parseApp :: Parser Expr
-parseApp =
-  liftA2 App (parseExpr) (some (sc *> parseExpr))
 
 parsePattern :: Parser Pattern  
 parsePattern = undefined
