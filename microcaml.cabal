@@ -34,6 +34,8 @@ common deps
     , text
     , megaparsec
     , vector
+    , composition-extra
+    , data-fix
 
   ghc-options:        -Wall
   default-extensions:

@@ -1,4 +1,5 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Lexer.Lexer where
 
@@ -10,9 +11,14 @@ import Data.Void
 import Control.Monad (void)
 import Data.Vector qualified as V
 import Control.Applicative hiding (some, many)
+import Data.Fix
 import Data.Maybe (isJust)
+import Data.List
+
+import Data.Functor.Syntax((<~$>), (<~~~$>))
 
 type Parser = Parsec Void T.Text
+
 
 
 lineComment :: Parser ()
@@ -36,6 +42,15 @@ lexeme = L.lexeme sc
 symbol :: T.Text -> Parser T.Text
 symbol = L.symbol sc
 
+betweenStr :: T.Text -> T.Text -> Parser a -> Parser a
+betweenStr open close = between (symbol open) (symbol close)
+
+parens :: Parser a -> Parser a
+parens = betweenStr "(" ")"
+
+squareParens :: Parser a -> Parser a
+squareParens = betweenStr "[" "]"
+
 moduleParser :: Parser Module -- header and list items
 moduleParser = L.nonIndented scn (L.indentBlock scn p)
   where
@@ -43,11 +58,12 @@ moduleParser = L.nonIndented scn (L.indentBlock scn p)
       empty
 
 term :: Parser a -> Parser (Term a)
-term p = do
-  posStart <- getSourcePos
-  payload  <- p
-  posEnd   <- getSourcePos
-  pure $ Term payload posStart posEnd
+term p = Term <~$> getSourcePos <*> lexeme p <*> getSourcePos
+-- term p = do
+--   posStart <- getSourcePos
+--   payload  <- lexeme p
+--   posEnd   <- getSourcePos
+--   pure $ Term payload posStart posEnd
 
 terms :: Parser a -> Parser (V.Vector (Term a))
 terms p = V.fromList <$> many (term p)
@@ -56,78 +72,66 @@ nameParser :: Parser T.Text
 nameParser = T.pack <$> liftA2 (:) lowerChar (many alphaNumChar)
 
 capNameParser :: Parser T.Text
-capNameParser = liftA2 (<>) (T.singleton <$> upperChar) nameParser
+capNameParser = liftA2 (<>) (T.singleton <$> upperChar) (T.pack <$> many alphaNumChar)
+
+moduleNameParser :: Parser ModuleName
+moduleNameParser = V.cons <$> term capNameParser
+                          <*> terms (string "." *> capNameParser)
+
+inlinePragmaParser :: Parser Pragma
+inlinePragmaParser = Pragma <$> term (squareParens $ T.pack <$> some alphaNumChar)
 
 pragmaParser :: Parser Pragma
-pragmaParser = Pragma <$> term (between (symbol "[")
-                                        (symbol "]")
-                                        (T.pack <$> some alphaNumChar))
+pragmaParser = inlinePragmaParser <* scn
 
 moduleDeclParser :: Parser ModuleDecl
-moduleDeclParser = do
-  pragmas  <- terms pragmaParser
-  symbol "module"
-  declName <- term capNameParser
-  pure $ ModuleDecl declName pragmas
+moduleDeclParser = ModuleDecl <~$> (terms pragmaParser <* symbol "module")
+                               <*> term moduleNameParser
 
 moduleImportParser :: Parser ModuleImport
-moduleImportParser = do
-  pragmas <- terms pragmaParser
-  symbol "import"
-  name    <- term capNameParser
-  
-  qualified <- isJust <$> optional (symbol "qualified")
-  asName    <- optional $ term $  symbol "as"
-                               *> capNameParser
-
-  pure $ ModuleImport { name       = name
-                      , qualified  = qualified
-                      , asName     = asName
-                      , pragmas    = pragmas
-                      }
+moduleImportParser = ModuleImport <~~~$> terms pragmaParser
+                                     <*> (symbol "import" *> term moduleNameParser)
+                                     <*> (isJust <$> optional (symbol "qualified"))
+                                     <*> optional (term $ symbol "as" *> moduleNameParser)
 
 dataDeclParser :: Parser DataDecl
 dataDeclParser = do
-  pragmas <- terms pragmaParser  
+  pragmas <- terms pragmaParser
   symbol "data"
   name    <- term capNameParser
   params  <- terms nameParser
   symbol ":="
-  
+
   headCons <- term dataConstructorDeclParser
-  tailCons <- terms $  symbol "|"
-                    *> dataConstructorDeclParser
+  tailCons <- terms $ symbol "|" *> dataConstructorDeclParser
+  let constructors = headCons `V.cons` tailCons
   
-  pure $ DataDecl { name         = name
-                  , params       = params
-                  , constructors = headCons `V.cons` tailCons
-                  , pragmas      = pragmas
-                  }
+  pure $ DataDecl {..}
 
 dataConstructorDeclParser :: Parser DataConstructorDecl
-dataConstructorDeclParser = do
-  name   <- term capNameParser
-  params <- terms nameParser
-  pure $ DataConstructorDecl { name   = name
-                             , params = params
-                             }
-  
+dataConstructorDeclParser =  DataConstructorDecl
+                         <$> term capNameParser
+                         <*> terms nameParser
+
+
 data DataDecl = DataDecl
   { name         :: Term T.Text
   , params       :: V.Vector (Term T.Text)
   , constructors :: V.Vector (Term DataConstructorDecl)
   , pragmas      :: V.Vector (Term Pragma)
   }
+  deriving (Show)
 
 data DataConstructorDecl = DataConstructorDecl
   { name :: Term T.Text
   , params  :: V.Vector (Term T.Text)
   }
+  deriving (Show)
 {- 
 [pragmas]
 data Type a b c := Type1 a b | Type2 c | Type3
 
--}                      
+-}
 {-
 [pragmas]
 module Name.Name.Name
@@ -146,10 +150,20 @@ data Term a = Term
   { payload :: a
   , posStart :: SourcePos
   , posEnd :: SourcePos
-  } deriving (Show)
+  }
+
+instance Show a => Show (Term a) where
+  show Term{..} = "{" <> show payload <> "} [" <> showSourcePos posStart <> "," <> showSourcePos posEnd <> "]" 
+    where
+      showSourcePos SourcePos{..} = showPos sourceLine <> ":" <> showPos sourceColumn
+      showPos = drop 4 . show 
+
+
+  
+type ModuleName = V.Vector (Term T.Text)
 
 data Module = Module
-  { moduleDecl :: Term T.Text
+  { moduleDecl :: Term ModuleName
   , moduleImports :: V.Vector (Term ModuleImport)
   , pragmas :: V.Vector (Term Pragma)
   } deriving (Show)
@@ -159,70 +173,105 @@ data Pragma = Pragma
   } deriving (Show)
 
 data ModuleDecl = ModuleDecl
-  { name :: Term T.Text
+  { name :: Term ModuleName
   , pragmas :: V.Vector (Term Pragma)
   } deriving (Show)
 
 data ModuleImport = ModuleImport
-  { name :: Term T.Text
+  { name :: Term ModuleName
   , qualified :: Bool
-  , asName ::  Maybe (Term T.Text)
+  , asName ::  Maybe (Term ModuleName)
   , pragmas :: V.Vector (Term Pragma)
   } deriving (Show)
 
 
 
+type Expr = Fix ExprF
 
-data Expr
-  = Id T.Text
-  | ExprLit Literal
-  | Let [(Pattern, Expr)] Expr
-  | LetRec [(Pattern, Expr)] Expr
-  | Lam Pattern Expr
-  | Case Expr [(Pattern, Expr)]
-  | App Expr [Expr]
-  deriving (Show)
+data ExprF next
+  = ExprLit Literal
+  | Let [(Pattern, next)] next
+  | LetRec [(Pattern, next)] next
+  | Lam Pattern next
+  | Case next [(Pattern, next)]
+  | App next [next]
+  | Pat (PatternF next)
+  deriving Functor
+
+
+instance {-#OVERLAPPING#-} Show Expr where
+  show = foldFix \case
+      ExprLit l -> show l
+      Let bindings next -> letBuilder "let " bindings next 
+      LetRec bindings next -> letBuilder "let rec " bindings next 
+      Lam pat next -> "\\" <> show pat <> " -> " <> next
+      Case expr branches -> "case " <> expr <> " of\n" <> concatMap showBranch branches
+      App func args -> "[app] " <> func <> " " <> unwords args
+      Pat p -> showPattern p
+    where
+      letBuilder :: String -> [(Pattern, String)] -> String -> String
+      letBuilder prefix bindings next = prefix <> concatMap showBind bindings <> " in " <> next
+      showBind :: (Pattern, String) -> String
+      showBind (pat, res) = show pat <> " := " <> res <> "\n"
+      showBranch (pat, res) = show pat <> " -> " <> res <> "\n"
 
 data Literal
   = Number Int
   | String T.Text
-  | Tuple [Literal]
   deriving (Show)
 
-data Pattern 
-  = Binding T.Text
+type Pattern = Fix PatternF
+
+type Construct = PatternF Expr
+
+data PatternF next
+  = Id T.Text
   | Lit Literal
-  | Deconstruct T.Text [Pattern]
-  deriving (Show)
+  | Tuple [next]
+  | Deconstruct T.Text [next]
+  deriving Functor
 
+showPattern :: PatternF String -> String
+showPattern = \case
+  Id t -> T.unpack t
+  Lit l -> show l
+  Tuple xs -> "(" <> intercalate ", " xs <> ")"
+  Deconstruct constr vals -> "(" <> T.unpack constr <> " " <> unwords vals <> ")"
+   
 
-parseExpr :: Parser Expr 
-parseExpr = makeApp <$> some (choice 
-  [ between (symbol "(") (symbol ")") parseExpr
-  , parseCase
-  , parseLam
-  , parseLet
-  , Id <$> nameParser
-  ])
+instance {-# OVERLAPPING #-} Show Pattern where
+  show = foldFix showPattern
+
+    
+parseExpr :: Parser Expr
+parseExpr = 
+  makeApp <$> some (lexeme (choice
+    [ try $ between (symbol "(") (symbol ")") parseExpr
+    , parseCase
+    , parseLam
+    , parseLet
+    , Fix . Pat <$> parseConstruct
+    ]))
   where
-    makeApp [x] = x
-    makeApp (x:xs) =  App x xs
+    makeApp [x] =  x
+    makeApp (x:xs) = Fix $ App x xs
 
 
 parseLam :: Parser Expr
 parseLam = do
-  symbol "\\"
-  pat <- parsePattern
-  symbol "->"
-  expr <- parseExpr
-  pure (Lam pat expr)
+   symbol "\\" 
+   pat <- parseDeconstruct
+   symbol "->" 
+   expr <- parseExpr
+   pure . Fix $ Lam pat expr
 
-parseCase :: Parser Expr 
+
+parseCase :: Parser Expr
 parseCase = L.indentBlock scn do
-  symbol "case"
-  expr <- parseExpr
-  symbol "of"
-  pure $ L.IndentMany Nothing (pure . Case expr) parseBranch
+  -- symbol "case"
+  -- expr <- parseExpr
+  -- symbol "of"
+  pure $ L.IndentSome Nothing (pure . Fix . Case (Fix (ExprLit (Number 5)))) parseBranch
 
 parseLet :: Parser Expr
 parseLet = do
@@ -230,28 +279,45 @@ parseLet = do
   r <- optional $ symbol "rec"
   bindings <- L.indentBlock scn do
     pure $ L.IndentSome Nothing pure do
-      pat <- parsePattern
+      pat <- parseDeconstruct
       symbol ":="
       expr <- parseExpr
       pure (pat, expr)
   symbol "in"
   expr <- parseExpr
   pure case r of
-    Just{} -> LetRec bindings expr
-    _ -> Let bindings expr
+    Just{} -> Fix $ LetRec bindings expr
+    _ -> Fix $ Let  bindings  expr
 
 parseBranch :: Parser (Pattern, Expr)
-parseBranch = do
-  pat <- parsePattern
+parseBranch =  do
+  pat <- parseDeconstruct
   symbol "->"
   expr <- parseExpr
   pure (pat, expr)
 
-parsePattern :: Parser Pattern  
-parsePattern = undefined
+
+parseDeconstruct :: Parser Pattern
+parseDeconstruct = Fix <$> parsePattern parseDeconstruct
+
+parseConstruct :: Parser Construct
+parseConstruct = parsePattern parseExpr
+
+parsePattern :: Parser a -> Parser (PatternF a)
+parsePattern p = lexeme $ choice 
+  [ Tuple <$> parseTuple p
+  , Id <$> nameParser
+  , Lit <$> parseLit
+  , Deconstruct <$> capNameParser <*> many p
+  ]
 
 parseLit :: Parser Literal
-parseLit = choice 
-  [ 
+parseLit = choice
+  [ Number <$> L.signed sc (lexeme L.decimal)
+  , String . T.pack <$> (char '"' *> manyTill L.charLiteral (char '"'))
   ]
+
+parseTuple :: Parser a -> Parser [a]
+parseTuple p = between (symbol "(") (symbol ")") (liftA2 (:) p (some (symbol "," *> p))) 
+
 
