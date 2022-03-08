@@ -36,6 +36,8 @@ common deps
     , vector
     , composition-extra
     , data-fix
+    , lens
+    , dlist
 
   ghc-options:        -Wall
   default-extensions:
@@ -95,6 +97,10 @@ library
   exposed-modules:
     AST.AST
     Lexer.Lexer
+    Lexer.Token
+    Lexer.Combinators
+    Lexer.Lex
 
   default-language: Haskell2010
-  build-tools:    
+  build-tools:  
+    alex  
