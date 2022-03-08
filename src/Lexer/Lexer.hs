@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
 module Lexer.Lexer where
 
@@ -105,7 +106,7 @@ dataDeclParser = do
   headCons <- term dataConstructorDeclParser
   tailCons <- terms $ symbol "|" *> dataConstructorDeclParser
   let constructors = headCons `V.cons` tailCons
-  
+
   pure $ DataDecl {..}
 
 dataConstructorDeclParser :: Parser DataConstructorDecl
@@ -153,13 +154,13 @@ data Term a = Term
   }
 
 instance Show a => Show (Term a) where
-  show Term{..} = "{" <> show payload <> "} [" <> showSourcePos posStart <> "," <> showSourcePos posEnd <> "]" 
+  show Term{..} = "{" <> show payload <> "} [" <> showSourcePos posStart <> "," <> showSourcePos posEnd <> "]"
     where
       showSourcePos SourcePos{..} = showPos sourceLine <> ":" <> showPos sourceColumn
-      showPos = drop 4 . show 
+      showPos = drop 4 . show
 
 
-  
+
 type ModuleName = V.Vector (Term T.Text)
 
 data Module = Module
@@ -202,18 +203,18 @@ data ExprF next
 instance {-#OVERLAPPING#-} Show Expr where
   show = foldFix \case
       ExprLit l -> show l
-      Let bindings next -> letBuilder "let " bindings next 
-      LetRec bindings next -> letBuilder "let rec " bindings next 
+      Let bindings next -> letBuilder "let " bindings next
+      LetRec bindings next -> letBuilder "let rec " bindings next
       Lam pat next -> "\\" <> show pat <> " -> " <> next
-      Case expr branches -> "case " <> expr <> " of\n" <> concatMap showBranch branches
+      Case expr branches -> "case " <> expr <> " of {\n" <> concatMap showBranch branches <> "}\n"
       App func args -> "[app] " <> func <> " " <> unwords args
       Pat p -> showPattern p
     where
       letBuilder :: String -> [(Pattern, String)] -> String -> String
-      letBuilder prefix bindings next = prefix <> concatMap showBind bindings <> " in " <> next
+      letBuilder prefix bindings next = prefix <> "{\n" <> concatMap showBind bindings <> "}\n in " <> next
       showBind :: (Pattern, String) -> String
-      showBind (pat, res) = show pat <> " := " <> res <> "\n"
-      showBranch (pat, res) = show pat <> " -> " <> res <> "\n"
+      showBind (pat, res) = show pat <> " := " <> res <> ";\n"
+      showBranch (pat, res) = show pat <> " -> " <> res <> ";\n"
 
 data Literal
   = Number Int
@@ -237,46 +238,49 @@ showPattern = \case
   Lit l -> show l
   Tuple xs -> "(" <> intercalate ", " xs <> ")"
   Deconstruct constr vals -> "(" <> T.unpack constr <> " " <> unwords vals <> ")"
-   
+
 
 instance {-# OVERLAPPING #-} Show Pattern where
   show = foldFix showPattern
 
-    
+
 parseExpr :: Parser Expr
-parseExpr = 
+parseExpr =
   makeApp <$> some (lexeme (choice
     [ try $ between (symbol "(") (symbol ")") parseExpr
     , parseCase
     , parseLam
     , parseLet
-    , Fix . Pat <$> parseConstruct
+    , wrapFix . Pat <$> parseConstruct
     ]))
   where
     makeApp [x] =  x
-    makeApp (x:xs) = Fix $ App x xs
+    makeApp (x:xs) = wrapFix $ App x xs
 
 
 parseLam :: Parser Expr
 parseLam = do
-   symbol "\\" 
+   symbol "\\"
    pat <- parseDeconstruct
-   symbol "->" 
+   symbol "->"
    expr <- parseExpr
    pure . Fix $ Lam pat expr
 
 
 parseCase :: Parser Expr
 parseCase = L.indentBlock scn do
-  -- symbol "case"
-  -- expr <- parseExpr
-  -- symbol "of"
-  pure $ L.IndentSome Nothing (pure . Fix . Case (Fix (ExprLit (Number 5)))) parseBranch
+  symbol "case"
+  --expr <- parseExpr
+  symbol "of"
+  pure $ L.IndentMany
+    Nothing
+    (pure . wrapFix . Case (wrapFix (ExprLit (Number 5))))
+    parseBranch
 
 parseLet :: Parser Expr
 parseLet = do
   symbol "let"
-  r <- optional $ symbol "rec"
+  recur <- fmap isJust . optional $ symbol "rec"
   bindings <- L.indentBlock scn do
     pure $ L.IndentSome Nothing pure do
       pat <- parseDeconstruct
@@ -284,17 +288,15 @@ parseLet = do
       expr <- parseExpr
       pure (pat, expr)
   symbol "in"
-  expr <- parseExpr
-  pure case r of
-    Just{} -> Fix $ LetRec bindings expr
-    _ -> Fix $ Let  bindings  expr
+  wrapFix . ( if recur then LetRec else Let )  bindings <$> parseExpr
 
 parseBranch :: Parser (Pattern, Expr)
 parseBranch =  do
   pat <- parseDeconstruct
   symbol "->"
-  expr <- parseExpr
-  pure (pat, expr)
+  expr <- parseLit
+  --expr <- parseExpr
+  pure ( pat, wrapFix $ ExprLit expr)
 
 
 parseDeconstruct :: Parser Pattern
@@ -304,7 +306,7 @@ parseConstruct :: Parser Construct
 parseConstruct = parsePattern parseExpr
 
 parsePattern :: Parser a -> Parser (PatternF a)
-parsePattern p = lexeme $ choice 
+parsePattern p = lexeme $ choice
   [ Tuple <$> parseTuple p
   , Id <$> nameParser
   , Lit <$> parseLit
@@ -318,6 +320,6 @@ parseLit = choice
   ]
 
 parseTuple :: Parser a -> Parser [a]
-parseTuple p = between (symbol "(") (symbol ")") (liftA2 (:) p (some (symbol "," *> p))) 
+parseTuple p = between (symbol "(") (symbol ")") (liftA2 (:) p (some (symbol "," *> p)))
 
 

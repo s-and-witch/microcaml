@@ -16,5 +16,5 @@ import Data.Text
 
 
 main :: IO ()
-main = Prelude.putStrLn "hui"
+main = Prelude.putStrLn "hw"
 
