@@ -1,18 +1,20 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE PartialTypeSignatures #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 module Lexer.Combinators where
 
 import Lexer.Token
 import Control.Lens
 import Data.ByteString.Lazy (ByteString)
-import qualified Data.ByteString.Lazy as BS
 import Data.Int (Int64)
 import Data.DList as D
+import Prelude hiding (last)
 
 class LexerMonad m where
   getPos :: m Pos
   getEntryLoc :: m Loc
   getLexemeContent :: m ByteString
+  getLexemeSize :: m Int64
   getLastLayout :: m Int64
   setNewLayout :: Int64 -> m ()
   endLayout :: m ()
@@ -22,15 +24,16 @@ class LexerMonad m where
   throwError :: Error -> m a
 
 
-data Error = UnexpectedBlockEnd
+data Error = UnexpectedBlockEnd 
+  deriving (Show, Eq)
 
 getCurrentLayout :: (Functor f, LexerMonad f) => f Int64
-getCurrentLayout = getLexemeContent <&> \bs -> BS.length bs - 1
+getCurrentLayout = getLexemeSize <&> \size -> size - 1
 
 constPos :: (Functor f, LexerMonad f) => Int -> f Loc
 constPos n = getPos <&> 
   \pos -> Loc pos (pos & column +~ n)
-  
+
 unaryPos :: (Functor f, LexerMonad f) => f Loc
 unaryPos = constPos 1
 
@@ -48,7 +51,6 @@ layoutTok = do
         setNewLayout current
         pure [BlockStart loc]
      | current > last -> pure []
-
      | current < last && not newL -> do
         let
           loop xs = do
@@ -60,7 +62,6 @@ layoutTok = do
         D.toList <$> loop empty
      | otherwise -> 
         throwError UnexpectedBlockEnd
-
 
 
 

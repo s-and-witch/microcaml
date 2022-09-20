@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module Lexer.Lexer where
 
@@ -200,7 +201,7 @@ data ExprF next
   deriving Functor
 
 
-instance {-#OVERLAPPING#-} Show Expr where
+instance {-# OVERLAPPING #-} Show Expr where
   show = foldFix \case
       ExprLit l -> show l
       Let bindings next -> letBuilder "let " bindings next
